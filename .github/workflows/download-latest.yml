@@ -1,4 +1,4 @@
-name: Tahoe Beta (latest) Recovery Image
+name: Tahoe Release (Latest) Recovery Image
 
 on:
   workflow_dispatch:
@@ -13,38 +13,48 @@ jobs:
         run: |
           git clone https://github.com/corpnewt/gibMacOS.git
 
-      - name: Download macOS Installer (latest beta)
+      - name: Download macOS Tahoe Installer (Public Release)
         run: |
-          python ./gibMacOS/gibMacOS.py -c developer -v Tahoe -m 26 -o /tmp/Tahoe-beta-latest
+          # ИЗМЕНЕНИЕ 1: Ищем в каталоге publicrelease (релиз), а не developer
+          # ИЗМЕНЕНИЕ 2: Ищем конкретно "Tahoe" версии "26"
+          # Сохраняем в папку /tmp/Tahoe-release
+          python ./gibMacOS/gibMacOS.py -c publicrelease -v "Tahoe" -m 26 -o /tmp/Tahoe-release
 
       - name: Install the assistant
         run: |
-          sudo installer -pkg /tmp/Tahoe-beta-latest/InstallAssistant.pkg -target /
+          # ИЗМЕНЕНИЕ 3: Путь изменен на /tmp/Tahoe-release (как в шаге выше)
+          sudo installer -pkg /tmp/Tahoe-release/InstallAssistant.pkg -target /
 
       - name: Generate macOS Installer
         run: |
+          # Скрипт сам найдет приложение в папке Программы (Install macOS Tahoe.app)
           INSTALLER=$(ls -d /Applications/Install*.app | head -n 1 || true)
           if [ ! -d "$INSTALLER" ]; then
             echo "Could not find Install macOS app in /Applications"
             ls -l /Applications
             exit 1
           fi
+          
+          # Выводим имя найденного установщика для проверки
+          echo "Found Installer: $INSTALLER"
+          
           SIZE_MB=$(du -sm "$INSTALLER" | cut -f1)
-
           # Add 40% headroom and ceil
           EXTRA=$(echo "($SIZE_MB * 0.4 + 0.999)/1" | bc)
-
           TOTAL_MB=$(( SIZE_MB + EXTRA ))
 
           echo "Installer size: $SIZE_MB MB"
           echo "Allocating DMG size: $TOTAL_MB MB"
 
+          # Создаем временный диск
           sudo hdiutil create -o /tmp/Tahoe -size ${TOTAL_MB}m -volname 'Tahoe' -layout SPUD -fs HFS+J
           sudo hdiutil attach /tmp/Tahoe.dmg -noverify -mountpoint /Volumes/Tahoe
           sleep 10
+          
+          # Создаем загрузочную флешку (виртуальную)
           sudo "$INSTALLER/Contents/Resources/createinstallmedia" --volume /Volumes/Tahoe --nointeraction
 
-          # Detect created installer volume (it always starts with "Install")
+          # Ищем созданный том (обычно Install macOS Tahoe)
           INSTALL_VOL=$(ls -d /Volumes/Install* | head -n 1 || true)
           if [ ! -d "$INSTALL_VOL" ]; then
             echo "Could not find installer volume in /Volumes"
@@ -53,6 +63,7 @@ jobs:
           fi
           echo "Found installer volume: $INSTALL_VOL"
 
+          # Копируем BaseSystem в папку для выгрузки
           cp -R "$INSTALL_VOL/BaseSystem" /tmp/BaseSystem
 
       - name: Upload com.apple.recovery.boot
@@ -60,4 +71,5 @@ jobs:
         with:
           name: com.apple.recovery.boot
           path: /tmp/BaseSystem/*
-          compression-level: 9
+          compression-level: 0 
+          # Ставим 0, чтобы быстрее паковал (файлы внутри и так сжаты)
